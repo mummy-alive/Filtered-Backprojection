@@ -2,7 +2,7 @@
 2023-11-20 Medisys lab intern study
 
 ### Description
-This is a Matlab code of Filtered Backprojection of Circle $$(x-a)^2 + (y-b)^2 = r^2$$ on coordinate plane.\
+This is a Matlab code of Filtered Backprojection of Circle $$(x-a)^2 + (y-b)^2 = r^2$$ on coordinate plane.
 
 Input
 - Coordinate value of center of the circle x, y
