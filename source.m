@@ -9,34 +9,30 @@ SCD = input("Enter SCD: ");
 
 view = input("How many views?: ");
 IN = input("Enter Attenuation coefficient of circle: ");
-%q1xval = [];
-%q2xval= [];
-%q1yval = [];
-%q2yval= [];
-dsxArr = [-(dt*delta/2):delta:(dt*delta/2)];  % x values of Detector & Source in Cart esian coordinate
-angch = 2*pi/(view-1);
-FPres = zeros(view, SDD); % Store Forward Projection Result.
+dsxArr = [-((dt-1)*delta/2):delta:((dt-1)*delta/2)];  % x values of Detector & Source in Cart esian coordinate
+angch = 2*pi/(view);
+FPres = zeros(view, dt); % Store Forward Projection Result.
 
 cnt=0;
 
 %Forward Projection
 %Step 1. Find projection from each angle. 
-for t = 0:angch:2*pi % rotate angle
+for t = 0:angch:2*pi-angch % rotate angle
     A = [cos(t) sin(t) ; -sin(t) cos(t)];
     cnt = cnt+1;
     for i = 1:dt   % #detector
-        q1 = A*[dsxArr(i); SCD];
-        q2 = A*[dsxArr(i); SDD-SCD];
+        q1 = A*[dsxArr(i); b - SCD];
+        q2 = A*[dsxArr(i); b - SCD + SDD];
         FPres(cnt, i) = IN*FP(a,b,r,q1,q2);
     end
 end
-sinogram_size = size(FPres);
+%sinogram_size = size(FPres);
 subplot(1, 3, 1);   
-heatmap(FPres);
+imshow(FPres, [0,0.005]);
 title('Original Sinogram');
 
 pad_size = 2 ^ ceil(log2(2*dt)); 
-FPres = fft(FPres, pad_size, 1);
+FPres = fft(FPres, pad_size, 2);
 
 % Step 2. h(n*theta)를 구현 후 Fourier transform
 rampFilter = zeros(1, pad_size/2+1);   %rampFilter
@@ -51,88 +47,46 @@ end
 reverserampFilter = fliplr(rampFilter);
 reverserampFilter(:,pad_size/2+1) = [];
 rampFilter = [reverserampFilter rampFilter];
-rampFilter = fft(rampFilter); %이 fft(X,n)을 하면 푸리에 변환 시, 함수 안에서 자체적으로 X를 n만큼 늘린 값으로 푸리에변환해줌.
+rampFilter = fft(rampFilter, pad_size); %이 fft(X,n)을 하면 푸리에 변환 시, 함수 안에서 자체적으로 X를 n만큼 늘린 값으로 푸리에변환해줌.
 
-FilterRes = zeros(size(FPres));
-for i=1:size(FPres,2)
-    for j=1:size(FPres,1)
-       FilterRes(j,i) = FPres(j,i) * rampFilter(j);
-    end
-end
+FilterRes = FPres .* rampFilter;
 
 % Step 3. (2) * (3) 후 inverse fourier transform.
 % 이 때, (2) * (3) 해주는 방향은 detector방향.
 
-FilterRes = ifft(FilterRes);
+FilterRes = ifft(FilterRes, pad_size, 2);
 % Inverse Fourier Transform으로 길어진 길이는, 중앙을 기준으로 기존 sinogram과 같은 크기로 자른다.
-FilterRes = arrayfun(@real, FilterRes);
-% 평행이동
-FilterRes_moved = zeros(size(FilterRes));
-for j=1:size(FilterRes,2)
-    for i=1:size(FilterRes,1)
-        FilterRes_moved(mod(i+size(FilterRes,1)/2, size(FilterRes,1)) + 1, j) = FilterRes(i, j);
-    end
-end
-subplot(1, 3, 2);  
-heatmap(FilterRes); 
-title('Filtered Sinogram')
 
 % 자르기
-FilterRes_moved = FilterRes_moved(1:view, :);
+FilterRes = FilterRes(:, pad_size/2+1:pad_size/2+dt);
+% FilterRes = FilterRes(:, dt:2*dt+1);
+% FilterRes = FilterRes(:, size(FilterRes,2)/2, size(FilterRes,2)/2 + dt);
+FilterRes = arrayfun(@real, FilterRes);
+subplot(1, 3, 2);
+imshow(FilterRes, [0,0.005]);
+title('Filtered Sinogram')
 
-subplot(1,3,3)
-heatmap(FilterRes_moved);
-title('Filtered Projection(Move & Cut)')
+% Back Projection 구현------------------------
+% FilterRes_moved = (view, dt)
+% view -> (view-1) * angch
+% dt -> -dt/2 ~ dt/2 -> -dt*delta/2 ~ dt*delta/2
+% 함수 변환함. 이렇게 된다면 delta 때문에 보간법 필요.
 
-
-
-%  Back Projection 코드 ------------------------------
-FBPres = zeros( ceil(dt * delta), SDD);   %가중치를 칠해줄 matrix. (x,y)이며, lower_bound 값이 본인의 좌표.)
-
-dsx = [-(dt*delta/2):delta/5:(dt*delta/2)]; %보간법으로 만든 새 detector의 x좌표들.
-dsx = dsx + (dt*delta/2);
-for i = 1:view %각 view에 대하여 값 더해줄 것임.
-    x = 1:dt;
-    v = FilterRes(i,x);
-    xq = 1:0.2:dt;
-    vq = interp1(x, v, xq); %각 view에 대한 g(t, theta) interpolation
-    t = (i-1)*angch;
-    m = tan(t);
-    A = [cos(t) sin(t); -sin(t) cos(t)];
-    for j = 1:size(1:0.2:dt)  % 보간된 값에 대하여, detector가 만나는 모든 격자에 가중치를 칠해줌.
-        % detector의 위치: xq
-        % detector에 주어진 가중치: vq
-        % 1. detector 직선함수 구하기
-        % 2. 직선 함수가 지나는 index 찾아서 그 곳에 vq 더해주기
-        % 개멍청한 방법이긴 한데 n^2 함수로 모든 index 돌면서 되나 안되나 찾을 수도 있음
-        
-        % 1. detector 직선함수 구하는 법:
-        newdot = A*[dsx(j); 0];  % 회전한 detector가 지나는 하나의 점. x절편을 회전한 것이다.
-        % y_dt = m * (x_range-q(1)) + q(2);   detector의 직선함수.
-        cnt = 0;
-
-        for p = 1:dt*delta
-            for q = 1:SDD
-                par = m * (p+0.5-newdot(1,1)) + newdot(2,1);
-                if par >= q &&  par < q+1 
-                    cnt = cnt+1;
-                end
-            end
-        end
-
-        for p = 1:dt*delta
-            for q = 1:SDD
-                par = m * (p+0.5-newdot(1,1)) + newdot(2,1);
-                if par >= q &&  par < q+1 
-                    FBPres(p,q) = FBPres(p,q) + (vq(j));
-                end
-            end
-        end
-
-    end
+px_size = 1;
+FBPres = zeros(512, 512);   % 고정. 바꾸지 말 것!
+[X, Y] = meshgrid(1:px_size:512, 1:px_size:512);
+for k = 1:view
+    t = (k-1)*angch;
+    T = (X+(px_size/2)-256) * cos(t) + (Y+(px_size/2)-256 + b-SCD) * sin(t);
+    kth_row = FilterRes(k,:);
+    vq = interp1(1:size(kth_row, 2), kth_row, T(:)/delta + (dt-1)/2 + 1, 'linear', 0);
+    %vq = interp1(1:size(kth_row, 2), kth_row, )
+    vq(isnan(vq)) = 0; % NaN 값은 0.
+    FBPres = FBPres + reshape(vq, size(X));
 end
-
-FBPres = (2*pi / view) * FBPres; 
+FBPres = (2*pi/view) * FBPres;
+subplot(1, 3, 3);  
+imshow(FBPres);
 
 function [res] = FP(x, y, r, q1, q2)  %Forward Projection implementation
     C = [x;y];
