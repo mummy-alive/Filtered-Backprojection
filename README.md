@@ -11,7 +11,7 @@ Input
 - Distance between each detectors
 - SDD, SCD
 - Total views of CT
-- Attenuation coefficient of circle
+- Attenuation coefficient
 
 ### Step 1: Forward Projection
 testcase 1:
